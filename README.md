@@ -23,7 +23,7 @@ Create `config.json` in the current working directory:
 ```
 
 ```sh
-go run . forward
+go run ./cmd/smsfwd forward
 ```
 
 Then send an SMS to the SIM card. You should see raw modem lines like:
@@ -91,7 +91,7 @@ To listen without sending the init AT commands:
 If port `0000000000013` does not show `OK` or SMS output, try:
 
 ```sh
-go run . forward
+go run ./cmd/smsfwd forward
 ```
 
 Change `port` in `config.json` before retrying.
@@ -103,26 +103,26 @@ The program gets the general serial port list from `go.bug.st/serial`. On Linux,
 List candidates:
 
 ```sh
-go run . ports
+go run ./cmd/smsfwd ports
 ```
 
 Run with automatic discovery:
 
 ```sh
-go run . forward
+go run ./cmd/smsfwd forward
 ```
 
 For long-running Linux deployment, prefer the stable symlink shown by `ports` when available:
 
 ```sh
-go run . forward
+go run ./cmd/smsfwd forward
 ```
 
 Set `port` in `config.json` to the stable symlink path.
 
 ## Telegram Control
 
-Telegram is the program's push and control surface. `telegram_token` and `telegram_chat` are required for `go run . forward`; `telegram_chat` must be an int64 chat ID and is also the only authorized chat allowed to use the bot controls.
+Telegram is the program's push and control surface. `telegram_token` and `telegram_chat` are required for `go run ./cmd/smsfwd forward`; `telegram_chat` must be an int64 chat ID and is also the only authorized chat allowed to use the bot controls.
 
 Configuration is read only from `config.json` in the current working directory. Missing files use built-in defaults, and empty string or zero number values in JSON fall back to defaults.
 
@@ -139,7 +139,7 @@ Configuration is read only from `config.json` in the current working directory. 
 ```
 
 ```sh
-go run . forward
+go run ./cmd/smsfwd forward
 ```
 
 Open the bot chat and send `/start` or `/menu` to show the inline keyboard. The bot uses long polling and deletes any existing webhook before polling.
@@ -166,7 +166,7 @@ To forward every raw line as well:
 ## Build
 
 ```sh
-go build -o air780e-sms-forwarder .
+go build -o smsfwd ./cmd/smsfwd
 ```
 
 The resulting binary does not need Python or Node.js.

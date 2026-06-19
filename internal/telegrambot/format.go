@@ -74,13 +74,6 @@ func appendHTMLChunk(b *strings.Builder, used *int, chunk string) bool {
 	return true
 }
 
-func formatRawLines(lines []string) string {
-	if len(lines) == 0 {
-		return ""
-	}
-	return escapeAndTruncate(strings.Join(lines, "\n"), 900)
-}
-
 func defaultText(value, fallback string) string {
 	if strings.TrimSpace(value) == "" {
 		return fallback

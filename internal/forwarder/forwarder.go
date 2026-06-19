@@ -44,7 +44,11 @@ func Run(ctx context.Context, cfg config.Config) error {
 	if err != nil {
 		return fmt.Errorf("open serial failed: %w", err)
 	}
-	defer port.Close()
+	defer func() {
+		if err := port.Close(); err != nil {
+			slog.Warn("serial port close failed", "err", err)
+		}
+	}()
 
 	events := make(chan sms.Event, 8)
 	rawLines := make(chan string, 32)

@@ -9,13 +9,13 @@ Go CLI that reads SMS messages pushed from an Air780E (EigenComm) cellular modem
 ## Commands
 
 ```sh
-go build -o air780e-sms-forwarder .   # build
+go build -o smsfwd ./cmd/smsfwd        # build
 go test ./...                          # run all tests
 go test ./internal/sms/                # test a single package
 go test ./internal/sms/ -run TestDecodePDU -v   # run a single test
 
-go run . ports                         # list/rank serial port candidates
-go run . forward                       # read config.json, listen + forward
+go run ./cmd/smsfwd ports              # list/rank serial port candidates
+go run ./cmd/smsfwd forward            # read config.json, listen + forward
 ```
 
 There is no lint config in the repo; use `go vet ./...` and `gofmt`.

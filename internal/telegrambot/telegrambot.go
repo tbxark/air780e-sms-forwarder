@@ -228,10 +228,16 @@ func (s *Service) handleError(ctx context.Context, b *telebot.Bot, update *tgapp
 	tgapp.SendErrorMessage(ctx, b, update, err)
 }
 
-func callbackPayload(update *tgapp.Update) (*callbackData, error) {
+func callbackPayload(update *tgapp.Update) (callbackData, error) {
 	if update == nil || update.CallbackQuery == nil {
-		return nil, errors.New("missing callback query")
+		return callbackData{}, errors.New("missing callback query")
 	}
 	_, data, err := tgapp.UnmarshalData[callbackData](update.CallbackQuery.Data)
-	return data, err
+	if err != nil {
+		return callbackData{}, err
+	}
+	if data == nil {
+		return callbackData{}, errors.New("missing callback payload")
+	}
+	return *data, nil
 }

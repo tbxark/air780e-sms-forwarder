@@ -43,7 +43,9 @@ func Load(path string) (Config, error) {
 		}
 		return Config{}, fmt.Errorf("open config %q: %w", path, err)
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 
 	if err := json.NewDecoder(f).Decode(&cfg); err != nil {
 		return Config{}, fmt.Errorf("decode config %q: %w", path, err)

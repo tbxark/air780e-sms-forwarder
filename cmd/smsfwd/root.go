@@ -1,7 +1,8 @@
-package cmd
+package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -12,6 +13,8 @@ import (
 	"github.com/tbxark/air780e-sms-forwarder/internal/forwarder"
 	"github.com/tbxark/air780e-sms-forwarder/internal/serialport"
 )
+
+var BuildVersion = "dev"
 
 func Execute() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -27,12 +30,13 @@ func Execute() {
 
 func NewRootCommand() *cobra.Command {
 	root := &cobra.Command{
-		Use:   "air780e-sms-forwarder",
+		Use:   "smsfwd",
 		Short: "Read Air780E SMS messages and forward them",
 	}
 
 	root.AddCommand(newForwardCommand())
 	root.AddCommand(newPortsCommand())
+	root.AddCommand(newVersionCommand())
 	return root
 }
 
@@ -66,6 +70,18 @@ func newPortsCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			serialport.PrintCandidates()
 			return nil
+		},
+	}
+}
+
+func newVersionCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print version information",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, err := fmt.Fprintln(cmd.OutOrStdout(), BuildVersion)
+			return err
 		},
 	}
 }

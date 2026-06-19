@@ -84,6 +84,18 @@ func TestActionForID(t *testing.T) {
 	}
 }
 
+func mustUnmarshalCallbackData(t *testing.T, value string) callbackData {
+	t.Helper()
+	_, data, err := tgapp.UnmarshalData[callbackData](value)
+	if err != nil {
+		t.Fatalf("unmarshal callback: %v", err)
+	}
+	if data == nil {
+		t.Fatal("unmarshal callback returned nil data")
+	}
+	return *data
+}
+
 func TestActionResultKeyboard(t *testing.T) {
 	keyboard := actionResultKeyboard("sms")
 	if len(keyboard) != 2 {
@@ -94,17 +106,11 @@ func TestActionResultKeyboard(t *testing.T) {
 			t.Fatalf("keyboard row %d has %d buttons, want 1", i, len(row))
 		}
 	}
-	_, backData, err := tgapp.UnmarshalData[callbackData](keyboard[0][0].CallbackData)
-	if err != nil {
-		t.Fatalf("unmarshal back callback: %v", err)
-	}
+	backData := mustUnmarshalCallbackData(t, keyboard[0][0].CallbackData)
 	if backData.ID != "sms" {
 		t.Fatalf("back id = %q, want sms", backData.ID)
 	}
-	_, mainData, err := tgapp.UnmarshalData[callbackData](keyboard[1][0].CallbackData)
-	if err != nil {
-		t.Fatalf("unmarshal main callback: %v", err)
-	}
+	mainData := mustUnmarshalCallbackData(t, keyboard[1][0].CallbackData)
 	if mainData.ID != "main" {
 		t.Fatalf("main id = %q, want main", mainData.ID)
 	}
@@ -135,10 +141,7 @@ func TestMainMenuButtons(t *testing.T) {
 	if !strings.HasPrefix(msg.Button[0][0].CallbackData, routeMenu+":") {
 		t.Fatalf("status callback = %q", msg.Button[0][0].CallbackData)
 	}
-	_, data, err := tgapp.UnmarshalData[callbackData](msg.Button[0][0].CallbackData)
-	if err != nil {
-		t.Fatalf("unmarshal callback: %v", err)
-	}
+	data := mustUnmarshalCallbackData(t, msg.Button[0][0].CallbackData)
 	if data.ID != "status" {
 		t.Fatalf("callback id = %q, want status", data.ID)
 	}
@@ -171,10 +174,7 @@ func TestWatchdogAlertIncludesRestartButton(t *testing.T) {
 	if !strings.HasPrefix(msg.Button[0][0].CallbackData, routeAct+":") {
 		t.Fatalf("restart callback = %q", msg.Button[0][0].CallbackData)
 	}
-	_, data, err := tgapp.UnmarshalData[callbackData](msg.Button[0][0].CallbackData)
-	if err != nil {
-		t.Fatalf("unmarshal restart callback: %v", err)
-	}
+	data := mustUnmarshalCallbackData(t, msg.Button[0][0].CallbackData)
 	if data.ID != "reset" {
 		t.Fatalf("restart callback id = %q, want reset", data.ID)
 	}
