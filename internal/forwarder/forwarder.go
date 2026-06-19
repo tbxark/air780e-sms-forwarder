@@ -13,6 +13,13 @@ import (
 	"github.com/tbxark/air780e-sms-forwarder/internal/telegrambot"
 )
 
+const (
+	serialWatchdogCommand    = ""
+	serialWatchdogInterval   = time.Minute
+	serialWatchdogThreshold  = 3
+	serialWatchdogAlertLimit = 10 * time.Second
+)
+
 func Run(ctx context.Context, cfg config.Config) error {
 	if cfg.TelegramToken == "" {
 		return fmt.Errorf("telegram_token is required")
@@ -72,6 +79,10 @@ func Run(ctx context.Context, cfg config.Config) error {
 	}()
 	slog.Info("telegram forwarding and polling control enabled")
 
+	watchdogCtx, cancelWatchdog := context.WithCancel(ctx)
+	defer cancelWatchdog()
+	go runSerialWatchdog(watchdogCtx, executor, telegram)
+
 	slog.Info("listening for SMS; press Ctrl+C to stop")
 	for {
 		select {
@@ -80,6 +91,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 			return nil
 		case <-atModem.Closed():
 			slog.Info("serial connection closed")
+			sendWatchdogAlert(ctx, telegram, fmt.Sprintf("serial connection closed on %s", cfg.Port))
 			return nil
 		case line := <-rawLines:
 			slog.Info("raw line received", "at", time.Now().Format(time.RFC3339), "line", line)
@@ -94,5 +106,52 @@ func Run(ctx context.Context, cfg config.Config) error {
 				slog.Error("telegram sms send failed", "err", err)
 			}
 		}
+	}
+}
+
+func runSerialWatchdog(ctx context.Context, executor telegrambot.Executor, telegram *telegrambot.Service) {
+	ticker := time.NewTicker(serialWatchdogInterval)
+	defer ticker.Stop()
+
+	failures := 0
+	alerted := false
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			err := probeSerial(ctx, executor)
+			if err == nil {
+				if failures > 0 {
+					slog.Info("serial watchdog recovered", "failures", failures)
+				}
+				failures = 0
+				alerted = false
+				continue
+			}
+
+			failures++
+			slog.Warn("serial watchdog probe failed", "failures", failures, "threshold", serialWatchdogThreshold, "err", err)
+			if failures < serialWatchdogThreshold || alerted {
+				continue
+			}
+
+			alerted = true
+			reason := fmt.Sprintf("serial watchdog probe failed %d consecutive times: %v", failures, err)
+			sendWatchdogAlert(ctx, telegram, reason)
+		}
+	}
+}
+
+func probeSerial(ctx context.Context, executor telegrambot.Executor) error {
+	_, err := executor.ExecuteAT(ctx, serialWatchdogCommand)
+	return err
+}
+
+func sendWatchdogAlert(ctx context.Context, telegram *telegrambot.Service, reason string) {
+	alertCtx, cancel := context.WithTimeout(ctx, serialWatchdogAlertLimit)
+	defer cancel()
+	if err := telegram.SendWatchdogAlert(alertCtx, reason); err != nil {
+		slog.Error("telegram watchdog alert send failed", "err", err)
 	}
 }

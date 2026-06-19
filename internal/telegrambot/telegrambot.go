@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
-	"sync"
 
 	tgapp "github.com/go-sphere/telegram-bot/telegram"
 	telebot "github.com/go-telegram/bot"
@@ -34,12 +33,6 @@ type Service struct {
 
 type callbackData struct {
 	ID string `json:"id"`
-}
-
-type action struct {
-	title    string
-	commands []string
-	parent   string
 }
 
 func New(cfg config.Config, executor Executor) (*Service, error) {
@@ -97,6 +90,10 @@ func (s *Service) SendSMS(ctx context.Context, event sms.Event) error {
 
 func (s *Service) SendRaw(ctx context.Context, line string) error {
 	return s.pushText(ctx, "Air780E raw: "+line)
+}
+
+func (s *Service) SendWatchdogAlert(ctx context.Context, reason string) error {
+	return s.sendMessage(ctx, s.chatID, formatWatchdogAlert(reason))
 }
 
 func (s *Service) SendDefaultMenu(ctx context.Context) error {
@@ -237,179 +234,4 @@ func callbackPayload(update *tgapp.Update) (*callbackData, error) {
 	}
 	_, data, err := tgapp.UnmarshalData[callbackData](update.CallbackQuery.Data)
 	return data, err
-}
-
-func mainMenuMessage() *tgapp.Message {
-	return &tgapp.Message{
-		Text: "Air780E Console\nChoose an action.",
-		Button: oneColumnKeyboard(
-			menuButton("Status", "status"),
-			menuButton("SMS History", "sms"),
-			menuButton("Device Control", "device"),
-			menuButton("Help", "help"),
-		),
-	}
-}
-
-func defaultBotCommands() []models.BotCommand {
-	return []models.BotCommand{
-		{Command: "start", Description: "Open the default control menu"},
-		{Command: "menu", Description: "Open the control menu"},
-	}
-}
-
-func sendMessageParams(chatID int64, msg *tgapp.Message) *telebot.SendMessageParams {
-	if msg == nil {
-		msg = &tgapp.Message{}
-	}
-	params := &telebot.SendMessageParams{
-		ChatID:    chatID,
-		Text:      truncateText(msg.Text),
-		ParseMode: msg.ParseMode,
-	}
-	if len(msg.Button) > 0 {
-		params.ReplyMarkup = &models.InlineKeyboardMarkup{InlineKeyboard: msg.Button}
-	}
-	return params
-}
-
-func statusMenuMessage() *tgapp.Message {
-	return &tgapp.Message{
-		Text: "Status",
-		Button: oneColumnKeyboard(
-			actionButton("Status Summary", "status_summary"),
-			actionButton("Signal Quality", "signal"),
-			actionButton("Network Registration", "registration"),
-			actionButton("Operator", "operator"),
-			actionButton("SIM Status", "sim"),
-			actionButton("Module Info", "module"),
-			menuButton("Back", "main"),
-		),
-	}
-}
-
-func smsMenuMessage() *tgapp.Message {
-	return &tgapp.Message{
-		Text: "SMS History",
-		Button: oneColumnKeyboard(
-			actionButton("Unread SMS", "sms_unread"),
-			actionButton("All SMS", "sms_all"),
-			actionButton("SMS Storage", "sms_storage"),
-			menuButton("Back", "main"),
-		),
-	}
-}
-
-func deviceMenuMessage() *tgapp.Message {
-	return &tgapp.Message{
-		Text: "Device Control",
-		Button: oneColumnKeyboard(
-			actionButton("Current Function Mode", "function_mode"),
-			actionButton("Re-enable SMS Push", "enable_sms_push"),
-			menuButton("Restart Module", "reset_confirm"),
-			menuButton("Back", "main"),
-		),
-	}
-}
-
-func resetConfirmMessage() *tgapp.Message {
-	return &tgapp.Message{
-		Text: "Restart the Air780E module? The serial connection may drop during reboot.",
-		Button: oneColumnKeyboard(
-			actionButton("Confirm Restart", "reset"),
-			menuButton("Cancel / Back", "device"),
-		),
-	}
-}
-
-func helpMessage() *tgapp.Message {
-	return &tgapp.Message{
-		Text: "Send /menu to open the control menu. New SMS messages are pushed to the authorized chat automatically. When telegram_raw=true, raw serial lines are pushed too.",
-		Button: oneColumnKeyboard(
-			menuButton("Back", "main"),
-		),
-	}
-}
-
-func backToMainKeyboard() [][]models.InlineKeyboardButton {
-	return oneColumnKeyboard(menuButton("Back to Main Menu", "main"))
-}
-
-func actionResultKeyboard(parent string) [][]models.InlineKeyboardButton {
-	if parent == "" || parent == "main" {
-		return backToMainKeyboard()
-	}
-	return oneColumnKeyboard(
-		menuButton("Back", parent),
-		menuButton("Main Menu", "main"),
-	)
-}
-
-func oneColumnKeyboard(buttons ...models.InlineKeyboardButton) [][]models.InlineKeyboardButton {
-	rows := make([][]models.InlineKeyboardButton, 0, len(buttons))
-	for _, button := range buttons {
-		rows = append(rows, []models.InlineKeyboardButton{button})
-	}
-	return rows
-}
-
-func menuButton(text, id string) models.InlineKeyboardButton {
-	return tgapp.NewButton(text, routeMenu, callbackData{ID: id})
-}
-
-func actionButton(text, id string) models.InlineKeyboardButton {
-	return tgapp.NewButton(text, routeAct, callbackData{ID: id})
-}
-
-func actionForID(id string) (action, bool) {
-	actions := map[string]action{
-		"status_summary":  {title: "Status Summary", parent: "status", commands: []string{"+CPIN?", "+CSQ", "+CREG?", "+CEREG?", "+COPS?", "+CFUN?"}},
-		"signal":          {title: "Signal Quality", parent: "status", commands: []string{"+CSQ"}},
-		"registration":    {title: "Network Registration", parent: "status", commands: []string{"+CREG?", "+CEREG?"}},
-		"operator":        {title: "Operator", parent: "status", commands: []string{"+COPS?"}},
-		"sim":             {title: "SIM Status", parent: "status", commands: []string{"+CPIN?", "+CCID"}},
-		"module":          {title: "Module Info", parent: "status", commands: []string{"+CGMI", "+CGMM", "+CGMR", "+CGSN"}},
-		"sms_unread":      {title: "Unread SMS", parent: "sms", commands: []string{"+CMGF=1", "+CMGL=\"REC UNREAD\""}},
-		"sms_all":         {title: "All SMS", parent: "sms", commands: []string{"+CMGF=1", "+CMGL=\"ALL\""}},
-		"sms_storage":     {title: "SMS Storage", parent: "sms", commands: []string{"+CPMS?"}},
-		"function_mode":   {title: "Current Function Mode", parent: "device", commands: []string{"+CFUN?"}},
-		"enable_sms_push": {title: "Re-enable SMS Push", parent: "device", commands: []string{"+CMGF=1", "+CNMI=2,2,0,0,0"}},
-		"reset":           {title: "Restart Module", parent: "device", commands: []string{"+RESET"}},
-	}
-	act, ok := actions[id]
-	return act, ok
-}
-
-func truncateText(text string) string {
-	runes := []rune(text)
-	if len(runes) <= maxText {
-		return text
-	}
-	suffix := "\n[truncated]"
-	limit := maxText - len([]rune(suffix))
-	if limit < 0 {
-		limit = 0
-	}
-	return string(runes[:limit]) + suffix
-}
-
-type MutexExecutor struct {
-	mu sync.Mutex
-	fn func(context.Context, string) ([]string, error)
-}
-
-func NewMutexExecutor(fn func(context.Context, string) ([]string, error)) *MutexExecutor {
-	return &MutexExecutor{fn: fn}
-}
-
-func (e *MutexExecutor) ExecuteAT(ctx context.Context, cmd string) ([]string, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-	if e.fn == nil {
-		return nil, errors.New("telegram AT executor function is required")
-	}
-	return e.fn(ctx, cmd)
 }

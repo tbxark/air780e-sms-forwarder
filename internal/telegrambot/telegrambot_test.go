@@ -124,8 +124,8 @@ func TestAllActionsHaveParentMenus(t *testing.T) {
 
 func TestMainMenuButtons(t *testing.T) {
 	msg := mainMenuMessage()
-	if len(msg.Button) != 5 {
-		t.Fatalf("button rows = %d, want 5", len(msg.Button))
+	if len(msg.Button) != 4 {
+		t.Fatalf("button rows = %d, want 4", len(msg.Button))
 	}
 	for i, row := range msg.Button {
 		if len(row) != 1 {
@@ -134,9 +134,6 @@ func TestMainMenuButtons(t *testing.T) {
 	}
 	if !strings.HasPrefix(msg.Button[0][0].CallbackData, routeMenu+":") {
 		t.Fatalf("status callback = %q", msg.Button[0][0].CallbackData)
-	}
-	if msg.Button[4][0].URL != docsURL {
-		t.Fatalf("docs URL = %q", msg.Button[4][0].URL)
 	}
 	_, data, err := tgapp.UnmarshalData[callbackData](msg.Button[0][0].CallbackData)
 	if err != nil {
@@ -155,6 +152,31 @@ func TestSubmenusUseSingleColumn(t *testing.T) {
 				t.Fatalf("%q row %d has %d buttons, want 1", msg.Text, i, len(row))
 			}
 		}
+	}
+}
+
+func TestWatchdogAlertIncludesRestartButton(t *testing.T) {
+	msg := formatWatchdogAlert("serial closed <bad>")
+	if msg.ParseMode != models.ParseModeHTML {
+		t.Fatalf("ParseMode = %q, want HTML", msg.ParseMode)
+	}
+	for _, want := range []string{"<b>Air780E Watchdog Alert</b>", "serial closed &lt;bad&gt;"} {
+		if !strings.Contains(msg.Text, want) {
+			t.Fatalf("watchdog alert missing %q: %s", want, msg.Text)
+		}
+	}
+	if len(msg.Button) == 0 || len(msg.Button[0]) != 1 {
+		t.Fatalf("watchdog alert missing restart button: %#v", msg.Button)
+	}
+	if !strings.HasPrefix(msg.Button[0][0].CallbackData, routeAct+":") {
+		t.Fatalf("restart callback = %q", msg.Button[0][0].CallbackData)
+	}
+	_, data, err := tgapp.UnmarshalData[callbackData](msg.Button[0][0].CallbackData)
+	if err != nil {
+		t.Fatalf("unmarshal restart callback: %v", err)
+	}
+	if data.ID != "reset" {
+		t.Fatalf("restart callback id = %q, want reset", data.ID)
 	}
 }
 

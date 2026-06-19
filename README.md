@@ -170,3 +170,7 @@ go build -o air780e-sms-forwarder .
 ```
 
 The resulting binary does not need Python or Node.js.
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
