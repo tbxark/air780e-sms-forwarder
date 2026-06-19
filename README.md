@@ -8,7 +8,7 @@ It can:
 - initialize SMS text-mode push with AT commands through `github.com/warthog618/modem/at`
 - print AT command responses and raw SMS-related modem indications
 - parse simple `+CMT` text and PDU SMS events
-- optionally forward parsed SMS messages through configured notification channels
+- forward parsed SMS messages to Telegram and expose Telegram inline-keyboard modem controls
 
 ## Quick test on this Mac
 
@@ -16,7 +16,9 @@ Create `config.json` in the current working directory:
 
 ```json
 {
-  "port": "/dev/cu.usbmodem0000000000013"
+  "port": "/dev/cu.usbmodem0000000000013",
+  "telegram_token": "123456:abc...",
+  "telegram_chat": "123456789"
 }
 ```
 
@@ -118,9 +120,9 @@ go run . forward
 
 Set `port` in `config.json` to the stable symlink path.
 
-## Notification channels
+## Telegram Control
 
-Message forwarding is pluggable in code. Telegram is currently the built-in channel, and it is enabled only when both Telegram settings are present.
+Telegram is the program's push and control surface. `telegram_token` and `telegram_chat` are required for `go run . forward`; `telegram_chat` must be an int64 chat ID and is also the only authorized chat allowed to use the bot controls.
 
 Configuration is read only from `config.json` in the current working directory. Missing files use built-in defaults, and empty string or zero number values in JSON fall back to defaults.
 
@@ -136,11 +138,19 @@ Configuration is read only from `config.json` in the current working directory. 
 }
 ```
 
-### Telegram
-
 ```sh
 go run . forward
 ```
+
+Open the bot chat and send `/start` or `/menu` to show the inline keyboard. The bot uses long polling and deletes any existing webhook before polling.
+
+The menu provides status queries, SMS history queries, device controls, help, and an OpenLuat AT documentation link. Button-triggered AT commands are serialized before they are sent to the modem.
+
+Available controls include:
+
+- status summary, signal quality, network registration, operator, SIM status, and module information
+- unread SMS, all SMS, and SMS storage queries
+- current function mode, re-enable SMS push, and reset with confirmation
 
 To forward every raw line as well:
 

@@ -2,6 +2,7 @@ package serialport
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -41,12 +42,12 @@ func Open(portName string, baud int) (serial.Port, error) {
 func PrintCandidates() {
 	candidates := Candidates()
 	if len(candidates) == 0 {
-		fmt.Println("No serial candidates found")
+		slog.Warn("no serial candidates found")
 		return
 	}
 
 	for _, candidate := range candidates {
-		fmt.Printf("%s score=%d source=%s\n", candidate.Port, candidate.Score, candidate.Source)
+		slog.Info("serial candidate", "port", candidate.Port, "score", candidate.Score, "source", candidate.Source)
 	}
 }
 
@@ -63,7 +64,7 @@ func Candidates() []Candidate {
 func serialLibraryCandidates() []Candidate {
 	ports, err := serial.GetPortsList()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "list serial ports failed: %v\n", err)
+		slog.Error("list serial ports failed", "err", err)
 		return nil
 	}
 	var candidates []Candidate

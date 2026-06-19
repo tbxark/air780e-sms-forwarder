@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -20,7 +20,7 @@ func Execute() {
 	root := NewRootCommand()
 	root.SetContext(ctx)
 	if err := root.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		slog.Error("command failed", "err", err)
 		os.Exit(1)
 	}
 }
@@ -38,12 +38,17 @@ func NewRootCommand() *cobra.Command {
 
 func newForwardCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "forward",
+		Use:   "forward [config]",
 		Short: "Listen for SMS messages and forward them",
-		Long:  "Listen to the Air780E serial port, parse SMS modem indications, and forward messages through configured notification channels.",
-		Args:  cobra.NoArgs,
+		Long:  "Listen to the Air780E serial port, parse SMS modem indications, and forward messages through configured notification channels. If config is omitted, config.json is used.",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(config.DefaultPath)
+			configPath := config.DefaultPath
+			if len(args) > 0 {
+				configPath = args[0]
+			}
+
+			cfg, err := config.Load(configPath)
 			if err != nil {
 				return err
 			}

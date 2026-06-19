@@ -3,7 +3,7 @@ package modem
 import (
 	"fmt"
 	"io"
-	"os"
+	"log/slog"
 	"time"
 
 	"github.com/tbxark/air780e-sms-forwarder/internal/sms"
@@ -17,7 +17,7 @@ func NewAT(port io.ReadWriter, rawLines chan<- string, events chan<- sms.Event) 
 			emitRawLines(rawLines, lines)
 			event, err := sms.ParseCMTIndication(lines)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "parse +CMT failed: %v\n", err)
+				slog.Error("parse +CMT failed", "err", err)
 				return
 			}
 			emitSMSEvent(events, event)
@@ -51,13 +51,13 @@ func InitAir780E(modem *modemat.AT) error {
 
 func RunATCommand(modem *modemat.AT, cmd string) ([]string, error) {
 	display := "AT" + cmd
-	fmt.Printf("TX %s\n", display)
+	slog.Info("at command tx", "command", display)
 	info, err := modem.Command(cmd)
 	if err != nil {
 		return nil, fmt.Errorf("%s failed: %w", display, err)
 	}
 	for _, line := range info {
-		fmt.Printf("RX %s\n", line)
+		slog.Info("at command rx", "line", line)
 	}
 	return info, nil
 }
@@ -67,7 +67,7 @@ func emitRawLines(rawLines chan<- string, lines []string) {
 		select {
 		case rawLines <- line:
 		default:
-			fmt.Fprintf(os.Stderr, "raw line dropped: %s\n", line)
+			slog.Warn("raw line dropped", "line", line)
 		}
 	}
 }
@@ -76,6 +76,6 @@ func emitSMSEvent(events chan<- sms.Event, event sms.Event) {
 	select {
 	case events <- event:
 	default:
-		fmt.Fprintf(os.Stderr, "sms event dropped: from=%s\n", event.From)
+		slog.Warn("sms event dropped", "from", event.From)
 	}
 }
