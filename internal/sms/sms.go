@@ -1,4 +1,4 @@
-package app
+package sms
 
 import (
 	"fmt"
@@ -10,16 +10,22 @@ import (
 	"unicode/utf16"
 )
 
+type Event struct {
+	From string
+	Text string
+	At   time.Time
+}
+
 var (
 	cmtHeaderRE    = regexp.MustCompile(`^\+CMT:\s*"([^"]*)"`)
 	cmtPDUHeaderRE = regexp.MustCompile(`^\+CMT:\s*(?:(?:"[^"]*"|[^,]*))?\s*,\s*(\d+)\s*$`)
 	hexLineRE      = regexp.MustCompile(`^[0-9A-Fa-f]+$`)
 )
 
-func parseCMTIndication(lines []string) (SMSEvent, error) {
-	var sms SMSEvent
+func ParseCMTIndication(lines []string) (Event, error) {
+	var event Event
 	if len(lines) < 2 {
-		return sms, fmt.Errorf("missing message body")
+		return event, fmt.Errorf("missing message body")
 	}
 
 	header := strings.TrimSpace(lines[0])
@@ -27,29 +33,41 @@ func parseCMTIndication(lines []string) (SMSEvent, error) {
 
 	if m := cmtPDUHeaderRE.FindStringSubmatch(header); len(m) == 2 {
 		if !hexLineRE.MatchString(body) {
-			return sms, fmt.Errorf("pdu body is not hex")
+			return event, fmt.Errorf("pdu body is not hex")
 		}
 		length, err := strconv.Atoi(m[1])
 		if err != nil {
-			return sms, fmt.Errorf("parse pdu length: %w", err)
+			return event, fmt.Errorf("parse pdu length: %w", err)
 		}
-		return decodeSMSPDU(body, length)
+		return DecodePDU(body, length)
 	}
 
 	if m := cmtHeaderRE.FindStringSubmatch(header); len(m) == 2 {
-		return SMSEvent{From: m[1], Text: body, At: time.Now()}, nil
+		return Event{From: m[1], Text: body, At: time.Now()}, nil
 	}
 
-	return sms, fmt.Errorf("unsupported +CMT header: %s", header)
+	return event, fmt.Errorf("unsupported +CMT header: %s", header)
 }
 
-func decodeSMSPDU(pdu string, expectedTPDULength int) (SMSEvent, error) {
-	var sms SMSEvent
-	sms.At = time.Now()
+func IsCMTPDUHeader(line string) bool {
+	return cmtPDUHeaderRE.MatchString(line)
+}
+
+func CMTPDUHeaderLength(line string) (string, bool) {
+	match := cmtPDUHeaderRE.FindStringSubmatch(line)
+	if len(match) != 2 {
+		return "", false
+	}
+	return match[1], true
+}
+
+func DecodePDU(pdu string, expectedTPDULength int) (Event, error) {
+	var event Event
+	event.At = time.Now()
 
 	pdu = strings.TrimSpace(pdu)
 	if len(pdu)%2 != 0 {
-		return sms, fmt.Errorf("odd pdu hex length")
+		return event, fmt.Errorf("odd pdu hex length")
 	}
 
 	pos := 0
@@ -75,64 +93,64 @@ func decodeSMSPDU(pdu string, expectedTPDULength int) (SMSEvent, error) {
 
 	smscLen, err := readByte()
 	if err != nil {
-		return sms, err
+		return event, err
 	}
 	if _, err := readHex(int(smscLen) * 2); err != nil {
-		return sms, err
+		return event, err
 	}
 	if expectedTPDULength >= 0 {
 		actualTPDULength := (len(pdu) - pos) / 2
 		if actualTPDULength != expectedTPDULength {
-			return sms, fmt.Errorf("tpdu length mismatch: header=%d actual=%d", expectedTPDULength, actualTPDULength)
+			return event, fmt.Errorf("tpdu length mismatch: header=%d actual=%d", expectedTPDULength, actualTPDULength)
 		}
 	}
 
 	firstOctet, err := readByte()
 	if err != nil {
-		return sms, err
+		return event, err
 	}
 	hasUDH := firstOctet&0x40 != 0
 
 	originLen, err := readByte()
 	if err != nil {
-		return sms, err
+		return event, err
 	}
 	originTOA, err := readByte()
 	if err != nil {
-		return sms, err
+		return event, err
 	}
 	originHexLen := int((originLen + 1) / 2 * 2)
 	originRaw, err := readHex(originHexLen)
 	if err != nil {
-		return sms, err
+		return event, err
 	}
-	sms.From = decodeSemiOctets(originRaw, int(originLen))
+	event.From = decodeSemiOctets(originRaw, int(originLen))
 	if originTOA == 0x91 {
-		sms.From = "+" + sms.From
+		event.From = "+" + event.From
 	}
 
 	if _, err := readByte(); err != nil {
-		return sms, err
+		return event, err
 	}
 	dcs, err := readByte()
 	if err != nil {
-		return sms, err
+		return event, err
 	}
 	if _, err := readHex(14); err != nil {
-		return sms, err
+		return event, err
 	}
 	userDataLen, err := readByte()
 	if err != nil {
-		return sms, err
+		return event, err
 	}
 	userData := pdu[pos:]
 
 	text, err := decodeUserData(dcs, hasUDH, int(userDataLen), userData)
 	if err != nil {
-		return sms, err
+		return event, err
 	}
-	sms.Text = text
-	return sms, nil
+	event.Text = text
+	return event, nil
 }
 
 func decodeSemiOctets(hex string, digits int) string {

@@ -12,8 +12,16 @@ It can:
 
 ## Quick test on this Mac
 
+Create `config.json` in the current working directory:
+
+```json
+{
+  "port": "/dev/cu.usbmodem0000000000013"
+}
+```
+
 ```sh
-go run . -port /dev/cu.usbmodem0000000000013
+go run . forward
 ```
 
 Then send an SMS to the SIM card. You should see raw modem lines like:
@@ -71,16 +79,20 @@ Reference docs:
 
 To listen without sending the init AT commands:
 
-```sh
-go run . -port /dev/cu.usbmodem0000000000013 -init=false
+```json
+{
+  "port": "/dev/cu.usbmodem0000000000013",
+  "init_modem": false
+}
 ```
 
 If port `0000000000013` does not show `OK` or SMS output, try:
 
 ```sh
-go run . -port /dev/cu.usbmodem0000000000015
-go run . -port /dev/cu.usbmodem0000000000017
+go run . forward
 ```
+
+Change `port` in `config.json` before retrying.
 
 ## Port discovery
 
@@ -90,39 +102,55 @@ List candidates:
 
 ```sh
 go run . ports
-
-# compatibility flag
-go run . -list-ports
 ```
 
 Run with automatic discovery:
 
 ```sh
-go run .
+go run . forward
 ```
 
-For long-running Linux deployment, prefer the stable symlink shown by `-list-ports` when available:
+For long-running Linux deployment, prefer the stable symlink shown by `ports` when available:
 
 ```sh
-go run . -port /dev/serial/by-id/usb-EigenComm_...
+go run . forward
 ```
+
+Set `port` in `config.json` to the stable symlink path.
 
 ## Notification channels
 
 Message forwarding is pluggable in code. Telegram is currently the built-in channel, and it is enabled only when both Telegram settings are present.
 
+Configuration is read only from `config.json` in the current working directory. Missing files use built-in defaults, and empty string or zero number values in JSON fall back to defaults.
+
+```json
+{
+  "port": "/dev/cu.usbmodem0000000000013",
+  "baud": 115200,
+  "configure_port": true,
+  "init_modem": true,
+  "telegram_raw": false,
+  "telegram_token": "123456:abc...",
+  "telegram_chat": "123456789"
+}
+```
+
 ### Telegram
 
 ```sh
-export TELEGRAM_BOT_TOKEN='123456:abc...'
-export TELEGRAM_CHAT_ID='123456789'
-go run . -port /dev/cu.usbmodem0000000000013
+go run . forward
 ```
 
 To forward every raw line as well:
 
-```sh
-go run . -port /dev/cu.usbmodem0000000000013 -telegram-raw
+```json
+{
+  "port": "/dev/cu.usbmodem0000000000013",
+  "telegram_raw": true,
+  "telegram_token": "123456:abc...",
+  "telegram_chat": "123456789"
+}
 ```
 
 ## Build

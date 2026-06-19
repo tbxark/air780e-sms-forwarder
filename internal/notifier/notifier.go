@@ -1,4 +1,4 @@
-package app
+package notifier
 
 import (
 	"bytes"
@@ -10,16 +10,19 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/tbxark/air780e-sms-forwarder/internal/config"
+	"github.com/tbxark/air780e-sms-forwarder/internal/sms"
 )
 
-type notifier interface {
+type Notifier interface {
 	Name() string
-	SendSMS(context.Context, SMSEvent) error
+	SendSMS(context.Context, sms.Event) error
 	SendRaw(context.Context, string) error
 }
 
-func buildNotifiers(cfg Config) []notifier {
-	var notifiers []notifier
+func Build(cfg config.Config) []Notifier {
+	var notifiers []Notifier
 	if cfg.TelegramToken != "" && cfg.TelegramChat != "" {
 		notifiers = append(notifiers, &telegramNotifier{
 			token:  cfg.TelegramToken,
@@ -40,7 +43,7 @@ func (t *telegramNotifier) Name() string {
 	return "Telegram"
 }
 
-func (t *telegramNotifier) SendSMS(ctx context.Context, sms SMSEvent) error {
+func (t *telegramNotifier) SendSMS(ctx context.Context, sms sms.Event) error {
 	return t.sendText(ctx, fmt.Sprintf("SMS from %s\n%s", sms.From, sms.Text))
 }
 

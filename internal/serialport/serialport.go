@@ -1,4 +1,4 @@
-package app
+package serialport
 
 import (
 	"fmt"
@@ -12,22 +12,34 @@ import (
 	"go.bug.st/serial"
 )
 
-type serialCandidate struct {
+type Candidate struct {
 	Port   string
 	Source string
 	Score  int
 }
 
-func autoDetectPort() (string, error) {
-	candidates := serialCandidates()
+func AutoDetect() (string, error) {
+	candidates := Candidates()
 	if len(candidates) == 0 {
 		return "", fmt.Errorf("no matching ports")
 	}
 	return candidates[0].Port, nil
 }
 
-func PrintSerialCandidates() {
-	candidates := serialCandidates()
+func Open(portName string, baud int) (serial.Port, error) {
+	if baud <= 0 {
+		return nil, fmt.Errorf("invalid baud %d", baud)
+	}
+	return serial.Open(portName, &serial.Mode{
+		BaudRate: baud,
+		DataBits: 8,
+		Parity:   serial.NoParity,
+		StopBits: serial.OneStopBit,
+	})
+}
+
+func PrintCandidates() {
+	candidates := Candidates()
 	if len(candidates) == 0 {
 		fmt.Println("No serial candidates found")
 		return
@@ -38,52 +50,52 @@ func PrintSerialCandidates() {
 	}
 }
 
-func serialCandidates() []serialCandidate {
-	var candidates []serialCandidate
+func Candidates() []Candidate {
+	var candidates []Candidate
 	if runtime.GOOS == "linux" {
 		candidates = append(candidates, linuxSerialByIDCandidates()...)
 	}
 	candidates = append(candidates, serialLibraryCandidates()...)
 
-	return rankSerialCandidates(candidates)
+	return RankCandidates(candidates)
 }
 
-func serialLibraryCandidates() []serialCandidate {
+func serialLibraryCandidates() []Candidate {
 	ports, err := serial.GetPortsList()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "list serial ports failed: %v\n", err)
 		return nil
 	}
-	var candidates []serialCandidate
+	var candidates []Candidate
 	for _, port := range ports {
-		candidates = append(candidates, serialCandidate{
+		candidates = append(candidates, Candidate{
 			Port:   port,
 			Source: "serial-list",
-			Score:  10 + scorePortName(port) + scoreLinuxTTY(port),
+			Score:  10 + ScorePortName(port) + scoreLinuxTTY(port),
 		})
 	}
 	return candidates
 }
 
-func linuxSerialByIDCandidates() []serialCandidate {
+func linuxSerialByIDCandidates() []Candidate {
 	matches, _ := filepath.Glob("/dev/serial/by-id/*")
-	var candidates []serialCandidate
+	var candidates []Candidate
 	for _, link := range matches {
 		port, err := filepath.EvalSymlinks(link)
 		if err != nil {
 			continue
 		}
-		candidates = append(candidates, serialCandidate{
+		candidates = append(candidates, Candidate{
 			Port:   port,
 			Source: "by-id:" + filepath.Base(link),
-			Score:  scorePortName(link) + scoreLinuxTTY(port) + 50,
+			Score:  ScorePortName(link) + scoreLinuxTTY(port) + 50,
 		})
 	}
 	return candidates
 }
 
-func rankSerialCandidates(candidates []serialCandidate) []serialCandidate {
-	best := make(map[string]serialCandidate)
+func RankCandidates(candidates []Candidate) []Candidate {
+	best := make(map[string]Candidate)
 	for _, candidate := range candidates {
 		if candidate.Port == "" {
 			continue
@@ -93,7 +105,7 @@ func rankSerialCandidates(candidates []serialCandidate) []serialCandidate {
 		}
 	}
 
-	ranked := make([]serialCandidate, 0, len(best))
+	ranked := make([]Candidate, 0, len(best))
 	for _, candidate := range best {
 		ranked = append(ranked, candidate)
 	}
@@ -106,7 +118,7 @@ func rankSerialCandidates(candidates []serialCandidate) []serialCandidate {
 	return ranked
 }
 
-func scorePortName(path string) int {
+func ScorePortName(path string) int {
 	name := strings.ToLower(filepath.Base(path))
 	score := 0
 	for _, marker := range []string{"eigencomm", "air780", "air780e", "luat"} {
