@@ -22,6 +22,17 @@ var (
 	hexLineRE      = regexp.MustCompile(`^[0-9A-Fa-f]+$`)
 )
 
+var gsm7DefaultAlphabet = [128]rune{
+	'@', '£', '$', '¥', 'è', 'é', 'ù', 'ì', 'ò', 'Ç', '\n', 'Ø', 'ø', '\r', 'Å', 'å',
+	'Δ', '_', 'Φ', 'Γ', 'Λ', 'Ω', 'Π', 'Ψ', 'Σ', 'Θ', 'Ξ', '\u001b', 'Æ', 'æ', 'ß', 'É',
+	' ', '!', '"', '#', '¤', '%', '&', '\'', '(', ')', '*', '+', ',', '-', '.', '/',
+	'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', ':', ';', '<', '=', '>', '?',
+	'¡', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O',
+	'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'Ä', 'Ö', 'Ñ', 'Ü', '§',
+	'¿', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o',
+	'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'ä', 'ö', 'ñ', 'ü', 'à',
+}
+
 func ParseCMTIndication(lines []string) (Event, error) {
 	var event Event
 	if len(lines) < 2 {
@@ -109,6 +120,18 @@ func DecodePDU(pdu string, expectedTPDULength int) (Event, error) {
 	if err != nil {
 		return event, err
 	}
+	mti := firstOctet & 0x03
+	switch mti {
+	case 0x00:
+		return decodeDeliverTPDU(event, firstOctet, pdu[pos:], readByte, readHex)
+	case 0x01:
+		return decodeSubmitTPDU(event, firstOctet, pdu[pos:], readByte, readHex)
+	default:
+		return event, fmt.Errorf("unsupported tpdu mti=0x%02X", mti)
+	}
+}
+
+func decodeDeliverTPDU(event Event, firstOctet byte, _ string, readByte func() (byte, error), readHex func(int) (string, error)) (Event, error) {
 	hasUDH := firstOctet&0x40 != 0
 
 	originLen, err := readByte()
@@ -143,7 +166,10 @@ func DecodePDU(pdu string, expectedTPDULength int) (Event, error) {
 	if err != nil {
 		return event, err
 	}
-	userData := pdu[pos:]
+	userData, err := readHexRemaining(readHex)
+	if err != nil {
+		return event, err
+	}
 
 	text, err := decodeUserData(dcs, hasUDH, int(userDataLen), userData)
 	if err != nil {
@@ -151,6 +177,83 @@ func DecodePDU(pdu string, expectedTPDULength int) (Event, error) {
 	}
 	event.Text = text
 	return event, nil
+}
+
+func decodeSubmitTPDU(event Event, firstOctet byte, _ string, readByte func() (byte, error), readHex func(int) (string, error)) (Event, error) {
+	hasUDH := firstOctet&0x40 != 0
+	if _, err := readByte(); err != nil { // MR
+		return event, err
+	}
+	destinationLen, err := readByte()
+	if err != nil {
+		return event, err
+	}
+	destinationTOA, err := readByte()
+	if err != nil {
+		return event, err
+	}
+	destinationHexLen := int((destinationLen + 1) / 2 * 2)
+	destinationRaw, err := readHex(destinationHexLen)
+	if err != nil {
+		return event, err
+	}
+	event.From = decodeSemiOctets(destinationRaw, int(destinationLen))
+	if destinationTOA == 0x91 {
+		event.From = "+" + event.From
+	}
+	if _, err := readByte(); err != nil { // PID
+		return event, err
+	}
+	dcs, err := readByte()
+	if err != nil {
+		return event, err
+	}
+	if err := skipSubmitValidityPeriod(firstOctet, readHex); err != nil {
+		return event, err
+	}
+	userDataLen, err := readByte()
+	if err != nil {
+		return event, err
+	}
+	userData, err := readHexRemaining(readHex)
+	if err != nil {
+		return event, err
+	}
+	text, err := decodeUserData(dcs, hasUDH, int(userDataLen), userData)
+	if err != nil {
+		return event, err
+	}
+	event.Text = text
+	return event, nil
+}
+
+func skipSubmitValidityPeriod(firstOctet byte, readHex func(int) (string, error)) error {
+	switch firstOctet & 0x18 {
+	case 0x00:
+		return nil
+	case 0x10:
+		_, err := readHex(2)
+		return err
+	case 0x08, 0x18:
+		_, err := readHex(14)
+		return err
+	default:
+		return nil
+	}
+}
+
+func readHexRemaining(readHex func(int) (string, error)) (string, error) {
+	var b strings.Builder
+	for {
+		s, err := readHex(2)
+		if err == io.ErrUnexpectedEOF {
+			return b.String(), nil
+		}
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(s)
+	}
 }
 
 func decodeSemiOctets(hex string, digits int) string {
@@ -253,18 +356,8 @@ func hexToBytes(hex string) ([]byte, error) {
 }
 
 func gsm7Rune(v byte) rune {
-	table := []rune{
-		'@', '£', '$', '¥', 'è', 'é', 'ù', 'ì', 'ò', 'Ç', '\n', 'Ø', 'ø', '\r', 'Å', 'å',
-		'Δ', '_', 'Φ', 'Γ', 'Λ', 'Ω', 'Π', 'Ψ', 'Σ', 'Θ', 'Ξ', '\u001b', 'Æ', 'æ', 'ß', 'É',
-		' ', '!', '"', '#', '¤', '%', '&', '\'', '(', ')', '*', '+', ',', '-', '.', '/',
-		'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', ':', ';', '<', '=', '>', '?',
-		'¡', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O',
-		'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'Ä', 'Ö', 'Ñ', 'Ü', '§',
-		'¿', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o',
-		'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'ä', 'ö', 'ñ', 'ü', 'à',
-	}
-	if int(v) >= len(table) {
+	if int(v) >= len(gsm7DefaultAlphabet) {
 		return '?'
 	}
-	return table[v]
+	return gsm7DefaultAlphabet[v]
 }

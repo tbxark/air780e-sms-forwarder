@@ -171,7 +171,7 @@ func (s *Service) handleAction(ctx context.Context, update *tgapp.Update) error 
 	}
 	results := s.runCommands(ctx, act.commands)
 	return s.app.SendMessage(ctx, update, &tgapp.Message{
-		Text:      formatCommandResult(act.title, results),
+		Text:      formatCommandResult(results),
 		ParseMode: models.ParseModeHTML,
 		Button:    actionResultKeyboard(act.parent),
 	})

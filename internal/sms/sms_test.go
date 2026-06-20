@@ -22,6 +22,26 @@ func TestDecodePDURejectsLengthMismatch(t *testing.T) {
 	}
 }
 
+func TestDecodePDU_SMSSubmitWithRelativeValidityPeriod(t *testing.T) {
+	event, err := DecodePDU("0011000B912143658709F10000AA04F4F29C0E", 18)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.From != "+12345678901" {
+		t.Fatalf("from = %q", event.From)
+	}
+	if event.Text != "test" {
+		t.Fatalf("text = %q", event.Text)
+	}
+}
+
+func TestDecodePDURejectsUnsupportedMTI(t *testing.T) {
+	_, err := DecodePDU("0002", 1)
+	if err == nil {
+		t.Fatal("expected unsupported MTI error")
+	}
+}
+
 func TestCMTPDUHeader(t *testing.T) {
 	cases := map[string]string{
 		`+CMT:,23`:       "23",

@@ -9,6 +9,7 @@ It can:
 - print AT command responses and raw SMS-related modem indications
 - parse simple `+CMT` text and PDU SMS events
 - forward parsed SMS messages to Telegram and expose Telegram inline-keyboard modem controls
+- keep Telegram polling alive across serial disconnects and retry serial reconnects with bounded backoff
 
 ## Quick test on this Mac
 
@@ -130,7 +131,6 @@ Configuration is read only from `config.json` in the current working directory. 
 {
   "port": "/dev/cu.usbmodem0000000000013",
   "baud": 115200,
-  "configure_port": true,
   "init_modem": true,
   "telegram_raw": false,
   "telegram_token": "123456:abc...",
@@ -144,7 +144,9 @@ go run ./cmd/smsfwd forward
 
 Open the bot chat and send `/start` or `/menu` to show the inline keyboard. The bot uses long polling and deletes any existing webhook before polling.
 
-The menu provides status queries, SMS history queries, device controls, help, and an OpenLuat AT documentation link. Button-triggered AT commands are serialized before they are sent to the modem.
+The menu provides status queries, SMS history queries, device controls, help, and an OpenLuat AT documentation link. Button-triggered AT commands are serialized before they are sent to the active modem session. If the USB serial device disconnects, Telegram polling stays active, the serial session is retried with bounded backoff, and automatic discovery is re-run when `port` is empty.
+
+SMS pushes and watchdog alerts are queued before Telegram API calls, so slow Telegram HTTP requests do not directly block modem event handling. Optional raw-line forwarding uses a smaller best-effort queue and may drop raw lines under sustained congestion.
 
 Available controls include:
 

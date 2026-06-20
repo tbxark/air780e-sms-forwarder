@@ -12,7 +12,6 @@ const DefaultPath = "config.json"
 type Config struct {
 	Port          string `json:"port"`
 	Baud          int    `json:"baud"`
-	ConfigurePort bool   `json:"configure_port"`
 	InitModem     bool   `json:"init_modem"`
 	TelegramRaw   bool   `json:"telegram_raw"`
 	TelegramToken string `json:"telegram_token"`
@@ -23,7 +22,6 @@ func Default() Config {
 	return Config{
 		Port:          "",
 		Baud:          115200,
-		ConfigurePort: true,
 		InitModem:     true,
 		TelegramToken: "",
 		TelegramChat:  "",

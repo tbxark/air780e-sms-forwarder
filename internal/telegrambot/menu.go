@@ -136,14 +136,17 @@ func actionButton(text, id string) models.InlineKeyboardButton {
 }
 
 func truncateText(text string) string {
+	return truncatePlainText(text, maxText)
+}
+
+func truncatePlainText(text string, limit int) string {
 	runes := []rune(text)
-	if len(runes) <= maxText {
+	if len(runes) <= limit {
 		return text
 	}
-	suffix := "\n[truncated]"
-	limit := maxText - len([]rune(suffix))
-	if limit < 0 {
-		limit = 0
+	cut := limit - len([]rune(truncationSuffix))
+	if cut < 0 {
+		cut = 0
 	}
-	return string(runes[:limit]) + suffix
+	return string(runes[:cut]) + truncationSuffix
 }

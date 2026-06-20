@@ -220,7 +220,7 @@ func TestSendMessageParamsIncludesDefaultMenu(t *testing.T) {
 }
 
 func TestFormatCommandResultAndTruncation(t *testing.T) {
-	text := formatCommandResult("Test", []commandResult{
+	text := formatCommandResult([]commandResult{
 		{Command: "+CSQ", Lines: []string{"+CSQ: 20,99", "OK"}},
 		{Command: "+COPS?", Err: errors.New("timeout")},
 	})
@@ -241,6 +241,23 @@ func TestFormatCommandResultAndTruncation(t *testing.T) {
 	}
 	if !strings.HasSuffix(long, "[truncated]") {
 		t.Fatalf("missing truncation suffix: %q", long[len(long)-20:])
+	}
+}
+
+func TestEscapeAndTruncateKeepsHTMLEntitiesValid(t *testing.T) {
+	text := escapeAndTruncate("<&>", 12)
+	if text != "\n[truncated]" {
+		t.Fatalf("text = %q, want truncation suffix only", text)
+	}
+
+	text = escapeAndTruncate("abc<&>", 15)
+	if text != "abc\n[truncated]" {
+		t.Fatalf("text = %q, want safe truncated prefix", text)
+	}
+
+	text = escapeAndTruncate("abc", 3)
+	if text != "abc" {
+		t.Fatalf("text = %q, want unmodified escaped text", text)
 	}
 }
 

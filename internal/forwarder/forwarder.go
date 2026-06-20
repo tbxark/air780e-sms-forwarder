@@ -2,8 +2,10 @@ package forwarder
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/tbxark/air780e-sms-forwarder/internal/config"
@@ -11,14 +13,158 @@ import (
 	"github.com/tbxark/air780e-sms-forwarder/internal/serialport"
 	"github.com/tbxark/air780e-sms-forwarder/internal/sms"
 	"github.com/tbxark/air780e-sms-forwarder/internal/telegrambot"
+	modemat "github.com/warthog618/modem/at"
+	serial "go.bug.st/serial"
 )
 
 const (
+	// Empty suffix makes modem.Command send a bare AT probe.
 	serialWatchdogCommand    = ""
 	serialWatchdogInterval   = time.Minute
 	serialWatchdogThreshold  = 3
 	serialWatchdogAlertLimit = 10 * time.Second
+	reconnectInitialBackoff  = 2 * time.Second
+	reconnectMaxBackoff      = 30 * time.Second
+	telegramImportantBuffer  = 64
+	telegramRawBuffer        = 16
 )
+
+var (
+	errSerialNotConnected  = errors.New("serial not connected")
+	errSerialSessionClosed = errors.New("serial session closed")
+	autoDetectSerialPort   = serialport.AutoDetect
+	openSerialPort         = serialport.Open
+)
+
+type telegramClient interface {
+	SendSMS(context.Context, sms.Event) error
+	SendRaw(context.Context, string) error
+	SendWatchdogAlert(context.Context, string) error
+}
+
+type reconnectableExecutor struct {
+	commandMu sync.Mutex
+	stateMu   sync.RWMutex
+	modem     *modemat.AT
+}
+
+func (e *reconnectableExecutor) Set(modem *modemat.AT) {
+	e.stateMu.Lock()
+	defer e.stateMu.Unlock()
+	e.modem = modem
+}
+
+func (e *reconnectableExecutor) Clear(modem *modemat.AT) {
+	e.stateMu.Lock()
+	defer e.stateMu.Unlock()
+	if e.modem == modem {
+		e.modem = nil
+	}
+}
+
+func (e *reconnectableExecutor) ExecuteAT(ctx context.Context, cmd string) ([]string, error) {
+	e.commandMu.Lock()
+	defer e.commandMu.Unlock()
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	e.stateMu.RLock()
+	atModem := e.modem
+	e.stateMu.RUnlock()
+	if atModem == nil {
+		return nil, errSerialNotConnected
+	}
+	return modem.RunATCommand(atModem, cmd)
+}
+
+type telegramSendKind int
+
+const (
+	telegramSendSMS telegramSendKind = iota
+	telegramSendRaw
+	telegramSendWatchdog
+)
+
+type telegramSendItem struct {
+	kind   telegramSendKind
+	event  sms.Event
+	line   string
+	reason string
+}
+
+type telegramSender struct {
+	client    telegramClient
+	important chan telegramSendItem
+	raw       chan telegramSendItem
+}
+
+func newTelegramSender(client telegramClient) *telegramSender {
+	return &telegramSender{
+		client:    client,
+		important: make(chan telegramSendItem, telegramImportantBuffer),
+		raw:       make(chan telegramSendItem, telegramRawBuffer),
+	}
+}
+
+func (s *telegramSender) Run(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case item := <-s.important:
+			s.send(ctx, item)
+		case item := <-s.raw:
+			s.send(ctx, item)
+		}
+	}
+}
+
+func (s *telegramSender) EnqueueSMS(ctx context.Context, event sms.Event) {
+	s.enqueueImportant(ctx, telegramSendItem{kind: telegramSendSMS, event: event})
+}
+
+func (s *telegramSender) EnqueueWatchdog(ctx context.Context, reason string) {
+	s.enqueueImportant(ctx, telegramSendItem{kind: telegramSendWatchdog, reason: reason})
+}
+
+func (s *telegramSender) EnqueueRaw(line string) {
+	select {
+	case s.raw <- telegramSendItem{kind: telegramSendRaw, line: line}:
+	default:
+		slog.Warn("telegram raw queue full; dropping raw line", "line", line)
+	}
+}
+
+func (s *telegramSender) enqueueImportant(ctx context.Context, item telegramSendItem) {
+	select {
+	case <-ctx.Done():
+	case s.important <- item:
+	}
+}
+
+func (s *telegramSender) send(ctx context.Context, item telegramSendItem) {
+	var err error
+	switch item.kind {
+	case telegramSendSMS:
+		err = s.client.SendSMS(ctx, item.event)
+	case telegramSendRaw:
+		err = s.client.SendRaw(ctx, item.line)
+	case telegramSendWatchdog:
+		alertCtx, cancel := context.WithTimeout(ctx, serialWatchdogAlertLimit)
+		err = s.client.SendWatchdogAlert(alertCtx, item.reason)
+		cancel()
+	}
+	if err != nil && ctx.Err() == nil {
+		slog.Error("telegram send failed", "kind", item.kind, "err", err)
+	}
+}
+
+type reconnectLoopOptions struct {
+	runSession     func(context.Context, config.Config, *reconnectableExecutor, *telegramSender) error
+	wait           func(context.Context, time.Duration) error
+	initialBackoff time.Duration
+	maxBackoff     time.Duration
+}
 
 func Run(ctx context.Context, cfg config.Config) error {
 	if cfg.TelegramToken == "" {
@@ -28,41 +174,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		return err
 	}
 
-	if cfg.Port == "" {
-		port, err := serialport.AutoDetect()
-		if err != nil {
-			return fmt.Errorf("serial port not found: %w\nset port in config.json", err)
-		}
-		cfg.Port = port
-	}
-
-	slog.Info("using serial port", "port", cfg.Port, "baud", cfg.Baud)
-	if !cfg.ConfigurePort {
-		slog.Warn("serial configuration flag is deprecated; the serial library configures the port when opening")
-	}
-	port, err := serialport.Open(cfg.Port, cfg.Baud)
-	if err != nil {
-		return fmt.Errorf("open serial failed: %w", err)
-	}
-	defer func() {
-		if err := port.Close(); err != nil {
-			slog.Warn("serial port close failed", "err", err)
-		}
-	}()
-
-	events := make(chan sms.Event, 8)
-	rawLines := make(chan string, 32)
-	atModem := modem.NewAT(port, rawLines, events)
-
-	if cfg.InitModem {
-		if err := modem.InitAir780E(atModem); err != nil {
-			return fmt.Errorf("initialize modem failed: %w", err)
-		}
-	}
-
-	executor := telegrambot.NewMutexExecutor(func(_ context.Context, cmd string) ([]string, error) {
-		return modem.RunATCommand(atModem, cmd)
-	})
+	executor := &reconnectableExecutor{}
 	telegram, err := telegrambot.New(cfg, executor)
 	if err != nil {
 		return err
@@ -82,38 +194,155 @@ func Run(ctx context.Context, cfg config.Config) error {
 		}
 	}()
 	slog.Info("telegram forwarding and polling control enabled")
+	sender := newTelegramSender(telegram)
+	go sender.Run(ctx)
 
 	watchdogCtx, cancelWatchdog := context.WithCancel(ctx)
 	defer cancelWatchdog()
-	go runSerialWatchdog(watchdogCtx, executor, telegram)
+	go runSerialWatchdog(watchdogCtx, executor, sender)
+
+	return runReconnectLoop(ctx, cfg, executor, sender)
+}
+
+func runReconnectLoop(ctx context.Context, cfg config.Config, executor *reconnectableExecutor, sender *telegramSender) error {
+	return runReconnectLoopWithOptions(ctx, cfg, executor, sender, reconnectLoopOptions{
+		runSession:     runSerialSession,
+		wait:           waitBackoff,
+		initialBackoff: reconnectInitialBackoff,
+		maxBackoff:     reconnectMaxBackoff,
+	})
+}
+
+func runReconnectLoopWithOptions(ctx context.Context, cfg config.Config, executor *reconnectableExecutor, sender *telegramSender, opts reconnectLoopOptions) error {
+	initialBackoff := opts.initialBackoff
+	if initialBackoff <= 0 {
+		initialBackoff = reconnectInitialBackoff
+	}
+	backoff := initialBackoff
+	maxBackoff := opts.maxBackoff
+	if maxBackoff <= 0 {
+		maxBackoff = reconnectMaxBackoff
+	}
+	runSession := opts.runSession
+	if runSession == nil {
+		runSession = runSerialSession
+	}
+	wait := opts.wait
+	if wait == nil {
+		wait = waitBackoff
+	}
+
+	for {
+		if ctx.Err() != nil {
+			slog.Info("stopped")
+			return nil
+		}
+		err := runSession(ctx, cfg, executor, sender)
+		if ctx.Err() != nil {
+			slog.Info("stopped")
+			return nil
+		}
+		if err != nil {
+			slog.Warn("serial session ended; reconnecting", "err", err, "backoff", backoff)
+		} else {
+			slog.Warn("serial session ended; reconnecting", "backoff", backoff)
+		}
+		waitDelay := backoff
+		if errors.Is(err, errSerialSessionClosed) {
+			waitDelay = initialBackoff
+		}
+		if err := wait(ctx, waitDelay); err != nil {
+			return nil
+		}
+		if errors.Is(err, errSerialSessionClosed) {
+			backoff = initialBackoff
+		} else {
+			backoff = nextBackoff(waitDelay, maxBackoff)
+		}
+	}
+}
+
+func runSerialSession(ctx context.Context, cfg config.Config, executor *reconnectableExecutor, sender *telegramSender) error {
+	portName := cfg.Port
+	if portName == "" {
+		port, err := autoDetectSerialPort()
+		if err != nil {
+			return fmt.Errorf("serial port not found: %w", err)
+		}
+		portName = port
+	}
+
+	slog.Info("using serial port", "port", portName, "baud", cfg.Baud)
+	port, err := openSerialPort(portName, cfg.Baud)
+	if err != nil {
+		return fmt.Errorf("open serial failed: %w", err)
+	}
+	return runOpenedSerialSession(ctx, cfg, portName, port, executor, sender)
+}
+
+func runOpenedSerialSession(ctx context.Context, cfg config.Config, portName string, port serial.Port, executor *reconnectableExecutor, sender *telegramSender) error {
+	var atModem *modemat.AT
+	defer func() {
+		if atModem != nil {
+			executor.Clear(atModem)
+		}
+		if err := port.Close(); err != nil {
+			slog.Warn("serial port close failed", "err", err)
+		}
+	}()
+
+	events := make(chan sms.Event, 8)
+	rawLines := make(chan string, 32)
+	atModem = modem.NewAT(port, rawLines, events)
+
+	if cfg.InitModem {
+		if err := modem.InitAir780E(atModem); err != nil {
+			return fmt.Errorf("initialize modem failed: %w", err)
+		}
+	}
+	executor.Set(atModem)
 
 	slog.Info("listening for SMS; press Ctrl+C to stop")
 	for {
 		select {
 		case <-ctx.Done():
-			slog.Info("stopped")
 			return nil
 		case <-atModem.Closed():
 			slog.Info("serial connection closed")
-			sendWatchdogAlert(ctx, telegram, fmt.Sprintf("serial connection closed on %s", cfg.Port))
-			return nil
+			sender.EnqueueWatchdog(ctx, fmt.Sprintf("serial connection closed on %s", portName))
+			return errSerialSessionClosed
 		case line := <-rawLines:
 			slog.Info("raw line received", "at", time.Now().Format(time.RFC3339), "line", line)
 			if cfg.TelegramRaw {
-				if err := telegram.SendRaw(ctx, line); err != nil {
-					slog.Error("telegram raw send failed", "err", err)
-				}
+				sender.EnqueueRaw(line)
 			}
 		case event := <-events:
 			slog.Info("sms received", "at", event.At.Format(time.RFC3339), "from", event.From, "text", event.Text)
-			if err := telegram.SendSMS(ctx, event); err != nil {
-				slog.Error("telegram sms send failed", "err", err)
-			}
+			sender.EnqueueSMS(ctx, event)
 		}
 	}
 }
 
-func runSerialWatchdog(ctx context.Context, executor telegrambot.Executor, telegram *telegrambot.Service) {
+func waitBackoff(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func nextBackoff(current, max time.Duration) time.Duration {
+	next := current * 2
+	if next > max {
+		return max
+	}
+	return next
+}
+
+func runSerialWatchdog(ctx context.Context, executor telegrambot.Executor, sender *telegramSender) {
 	ticker := time.NewTicker(serialWatchdogInterval)
 	defer ticker.Stop()
 
@@ -142,7 +371,7 @@ func runSerialWatchdog(ctx context.Context, executor telegrambot.Executor, teleg
 
 			alerted = true
 			reason := fmt.Sprintf("serial watchdog probe failed %d consecutive times: %v", failures, err)
-			sendWatchdogAlert(ctx, telegram, reason)
+			sender.EnqueueWatchdog(ctx, reason)
 		}
 	}
 }
@@ -150,12 +379,4 @@ func runSerialWatchdog(ctx context.Context, executor telegrambot.Executor, teleg
 func probeSerial(ctx context.Context, executor telegrambot.Executor) error {
 	_, err := executor.ExecuteAT(ctx, serialWatchdogCommand)
 	return err
-}
-
-func sendWatchdogAlert(ctx context.Context, telegram *telegrambot.Service, reason string) {
-	alertCtx, cancel := context.WithTimeout(ctx, serialWatchdogAlertLimit)
-	defer cancel()
-	if err := telegram.SendWatchdogAlert(alertCtx, reason); err != nil {
-		slog.Error("telegram watchdog alert send failed", "err", err)
-	}
 }

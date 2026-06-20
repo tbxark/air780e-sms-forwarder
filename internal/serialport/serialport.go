@@ -121,12 +121,7 @@ func RankCandidates(candidates []Candidate) []Candidate {
 
 func ScorePortName(path string) int {
 	name := strings.ToLower(filepath.Base(path))
-	score := 0
-	for _, marker := range []string{"eigencomm", "air780", "air780e", "luat"} {
-		if strings.Contains(name, marker) {
-			score += 100
-		}
-	}
+	score := scoreMarkerEvidence(name)
 	if strings.Contains(name, "if03") {
 		score += 30
 	} else if strings.Contains(name, "if05") {
@@ -138,19 +133,27 @@ func ScorePortName(path string) int {
 	return score
 }
 
+func scoreMarkerEvidence(values ...string) int {
+	for _, value := range values {
+		lower := strings.ToLower(value)
+		if strings.Contains(lower, "eigencomm") || strings.Contains(lower, "air780e") || strings.Contains(lower, "air780") || strings.Contains(lower, "luat") {
+			return 100
+		}
+	}
+	return 0
+}
+
 func scoreLinuxTTY(port string) int {
 	if runtime.GOOS != "linux" {
 		return 0
 	}
 
-	info := readLinuxTTYUSBInfo(filepath.Base(port))
+	return scoreLinuxTTYInfo(readLinuxTTYUSBInfo(filepath.Base(port)))
+}
+
+func scoreLinuxTTYInfo(info linuxTTYUSBInfo) int {
 	score := 0
-	for _, value := range []string{info.Manufacturer, info.Product, info.Interface} {
-		lower := strings.ToLower(value)
-		if strings.Contains(lower, "eigencomm") || strings.Contains(lower, "air780") || strings.Contains(lower, "luat") {
-			score += 100
-		}
-	}
+	score += scoreMarkerEvidence(info.Manufacturer, info.Product, info.Interface)
 	if strings.EqualFold(info.VendorID, "19d1") && strings.EqualFold(info.ProductID, "0001") {
 		score += 150
 	}

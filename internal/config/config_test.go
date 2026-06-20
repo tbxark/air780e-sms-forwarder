@@ -55,3 +55,21 @@ func TestLoadInvalidJSONReturnsError(t *testing.T) {
 		t.Fatal("Load returned nil error for invalid JSON")
 	}
 }
+
+func TestLoadIgnoresUnknownConfigurePort(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{
+		"configure_port": false,
+		"telegram_chat": "12345"
+	}`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.TelegramChat != "12345" {
+		t.Fatalf("TelegramChat = %q, want %q", cfg.TelegramChat, "12345")
+	}
+}

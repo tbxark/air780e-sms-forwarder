@@ -14,6 +14,13 @@ import (
 
 const smsBodyMax = 3000
 
+const (
+	truncationSuffix  = "\n[truncated]"
+	fromPreviewMax    = 256
+	watchdogReasonMax = 1200
+	cmglItemMax       = 600
+)
+
 type commandResult struct {
 	Command string
 	Lines   []string
@@ -21,7 +28,7 @@ type commandResult struct {
 }
 
 func formatSMSMessage(event sms.Event) *tgapp.Message {
-	from := escapeAndTruncate(defaultText(event.From, "unknown"), 256)
+	from := escapeAndTruncate(defaultText(event.From, "unknown"), fromPreviewMax)
 	at := html.EscapeString(event.At.Format(time.RFC3339))
 	body := escapeAndTruncate(defaultText(event.Text, "(empty)"), smsBodyMax)
 
@@ -33,7 +40,7 @@ func formatSMSMessage(event sms.Event) *tgapp.Message {
 
 func formatWatchdogAlert(reason string) *tgapp.Message {
 	at := html.EscapeString(time.Now().Format(time.RFC3339))
-	body := escapeAndTruncate(defaultText(reason, "serial watchdog reported an unknown error"), 1200)
+	body := escapeAndTruncate(defaultText(reason, "serial watchdog reported an unknown error"), watchdogReasonMax)
 	return &tgapp.Message{
 		Text:      fmt.Sprintf("<b>Air780E Watchdog Alert</b>\n\n<b>Time</b>: <code>%s</code>\n<b>Reason</b>\n<pre>%s</pre>", at, body),
 		ParseMode: models.ParseModeHTML,
@@ -41,7 +48,7 @@ func formatWatchdogAlert(reason string) *tgapp.Message {
 	}
 }
 
-func formatCommandResult(_ string, results []commandResult) string {
+func formatCommandResult(results []commandResult) string {
 	var b strings.Builder
 	used := 0
 	for _, result := range results {
@@ -55,17 +62,16 @@ func formatCommandResult(_ string, results []commandResult) string {
 }
 
 func appendHTMLChunk(b *strings.Builder, used *int, chunk string) bool {
-	suffix := "\n[truncated]"
 	chunkLen := utf8.RuneCountInString(chunk)
-	suffixLen := utf8.RuneCountInString(suffix)
+	suffixLen := utf8.RuneCountInString(truncationSuffix)
 	if *used+chunkLen > maxText {
 		if *used+suffixLen <= maxText {
-			b.WriteString(suffix)
+			b.WriteString(truncationSuffix)
 		}
 		return false
 	}
 	if *used+chunkLen+suffixLen > maxText {
-		b.WriteString(suffix)
+		b.WriteString(truncationSuffix)
 		*used += suffixLen
 		return false
 	}
@@ -85,19 +91,22 @@ func escapeAndTruncate(text string, limit int) string {
 	if limit <= 0 {
 		return ""
 	}
-	suffix := "\n[truncated]"
-	suffixLen := utf8.RuneCountInString(suffix)
+	escaped := html.EscapeString(text)
+	if utf8.RuneCountInString(escaped) <= limit {
+		return escaped
+	}
+	suffixLen := utf8.RuneCountInString(truncationSuffix)
 	var b strings.Builder
 	used := 0
 	for i, r := range text {
 		escaped := html.EscapeString(string(r))
 		width := utf8.RuneCountInString(escaped)
 		if i+utf8.RuneLen(r) < len(text) && used+width+suffixLen > limit {
-			b.WriteString(suffix)
+			b.WriteString(truncationSuffix)
 			return b.String()
 		}
 		if used+width > limit {
-			b.WriteString(suffix)
+			b.WriteString(truncationSuffix)
 			return b.String()
 		}
 		b.WriteString(escaped)
