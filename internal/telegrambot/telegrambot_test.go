@@ -274,16 +274,21 @@ func TestFormatSMSMessageUsesHTML(t *testing.T) {
 	if msg.ParseMode != models.ParseModeHTML {
 		t.Fatalf("ParseMode = %q, want HTML", msg.ParseMode)
 	}
-	for _, want := range []string{"<b>New SMS</b>", "hello &lt;world&gt;&amp;", "<b>Sender</b>: <code>+123&lt;456&gt;</code>", "<b>Received</b>: <code>2026-06-19T10:20:30Z</code>"} {
+	for _, want := range []string{"hello &lt;world&gt;&amp;", "<b>Contact/Phone</b>: +123&lt;456&gt;", "<b>Received</b>: 2026-06-19T10:20:30Z"} {
 		if !strings.Contains(msg.Text, want) {
 			t.Fatalf("SMS text missing %q: %s", want, msg.Text)
 		}
 	}
-	if strings.Contains(msg.Text, "<pre>") {
-		t.Fatalf("SMS text should not use code blocks: %s", msg.Text)
+	for _, unwanted := range []string{"<b>New SMS</b>", "<pre>", "<code>"} {
+		if strings.Contains(msg.Text, unwanted) {
+			t.Fatalf("SMS text should not contain %q: %s", unwanted, msg.Text)
+		}
+	}
+	if !strings.HasPrefix(msg.Text, "hello &lt;world&gt;&amp;\nline2") {
+		t.Fatalf("SMS body should be at the top: %s", msg.Text)
 	}
 	bodyAt := strings.Index(msg.Text, "hello &lt;world&gt;&amp;")
-	senderAt := strings.Index(msg.Text, "<b>Sender</b>")
+	senderAt := strings.Index(msg.Text, "<b>Contact/Phone</b>")
 	receivedAt := strings.Index(msg.Text, "<b>Received</b>")
 	if bodyAt < 0 || senderAt < 0 || receivedAt < 0 || bodyAt > senderAt || senderAt > receivedAt {
 		t.Fatalf("SMS body should appear before sender and received metadata: %s", msg.Text)

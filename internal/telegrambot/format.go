@@ -33,7 +33,7 @@ func formatSMSMessage(event sms.Event) *tgapp.Message {
 	body := escapeAndTruncate(defaultText(event.Text, "(empty)"), smsBodyMax)
 
 	return &tgapp.Message{
-		Text:      fmt.Sprintf("<b>New SMS</b>\n\n%s\n\n<b>Sender</b>: <code>%s</code>\n<b>Received</b>: <code>%s</code>", body, from, at),
+		Text:      fmt.Sprintf("%s\n\n<b>Contact/Phone</b>: %s\n<b>Received</b>: %s", body, from, at),
 		ParseMode: models.ParseModeHTML,
 	}
 }
