@@ -33,7 +33,7 @@ func formatSMSMessage(event sms.Event) *tgapp.Message {
 	body := escapeAndTruncate(defaultText(event.Text, "(empty)"), smsBodyMax)
 
 	return &tgapp.Message{
-		Text:      fmt.Sprintf("<b>New SMS</b>\n\n<b>From</b>: <code>%s</code>\n<b>Time</b>: <code>%s</code>\n\n<b>Content</b>\n<pre>%s</pre>", from, at, body),
+		Text:      fmt.Sprintf("<b>New SMS</b>\n\n%s\n\n<b>Sender</b>: <code>%s</code>\n<b>Received</b>: <code>%s</code>", body, from, at),
 		ParseMode: models.ParseModeHTML,
 	}
 }
@@ -42,7 +42,7 @@ func formatWatchdogAlert(reason string) *tgapp.Message {
 	at := html.EscapeString(time.Now().Format(time.RFC3339))
 	body := escapeAndTruncate(defaultText(reason, "serial watchdog reported an unknown error"), watchdogReasonMax)
 	return &tgapp.Message{
-		Text:      fmt.Sprintf("<b>Air780E Watchdog Alert</b>\n\n<b>Time</b>: <code>%s</code>\n<b>Reason</b>\n<pre>%s</pre>", at, body),
+		Text:      fmt.Sprintf("<b>Air780E Watchdog Alert</b>\n\n%s\n\n<b>Time</b>: <code>%s</code>", body, at),
 		ParseMode: models.ParseModeHTML,
 		Button:    watchdogAlertKeyboard(),
 	}

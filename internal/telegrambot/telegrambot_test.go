@@ -168,6 +168,14 @@ func TestWatchdogAlertIncludesRestartButton(t *testing.T) {
 			t.Fatalf("watchdog alert missing %q: %s", want, msg.Text)
 		}
 	}
+	if strings.Contains(msg.Text, "<pre>") {
+		t.Fatalf("watchdog alert should not use code blocks: %s", msg.Text)
+	}
+	reasonAt := strings.Index(msg.Text, "serial closed &lt;bad&gt;")
+	timeAt := strings.Index(msg.Text, "<b>Time</b>")
+	if reasonAt < 0 || timeAt < 0 || reasonAt > timeAt {
+		t.Fatalf("watchdog reason should appear before metadata: %s", msg.Text)
+	}
 	if len(msg.Button) == 0 || len(msg.Button[0]) != 1 {
 		t.Fatalf("watchdog alert missing restart button: %#v", msg.Button)
 	}
@@ -266,10 +274,37 @@ func TestFormatSMSMessageUsesHTML(t *testing.T) {
 	if msg.ParseMode != models.ParseModeHTML {
 		t.Fatalf("ParseMode = %q, want HTML", msg.ParseMode)
 	}
-	for _, want := range []string{"<b>New SMS</b>", "+123&lt;456&gt;", "hello &lt;world&gt;&amp;", "<pre>"} {
+	for _, want := range []string{"<b>New SMS</b>", "hello &lt;world&gt;&amp;", "<b>Sender</b>: <code>+123&lt;456&gt;</code>", "<b>Received</b>: <code>2026-06-19T10:20:30Z</code>"} {
 		if !strings.Contains(msg.Text, want) {
 			t.Fatalf("SMS text missing %q: %s", want, msg.Text)
 		}
+	}
+	if strings.Contains(msg.Text, "<pre>") {
+		t.Fatalf("SMS text should not use code blocks: %s", msg.Text)
+	}
+	bodyAt := strings.Index(msg.Text, "hello &lt;world&gt;&amp;")
+	senderAt := strings.Index(msg.Text, "<b>Sender</b>")
+	receivedAt := strings.Index(msg.Text, "<b>Received</b>")
+	if bodyAt < 0 || senderAt < 0 || receivedAt < 0 || bodyAt > senderAt || senderAt > receivedAt {
+		t.Fatalf("SMS body should appear before sender and received metadata: %s", msg.Text)
+	}
+}
+
+func TestExplainCMGLMessageLayoutAvoidsCodeBlocks(t *testing.T) {
+	text := strings.Join(explainCMGL([]string{`+CMGL: 1,"REC READ","+123<456>",,"26/06/19,18:00:00+32"`, "hello <world>&", "OK"}), "\n")
+	for _, want := range []string{"Read 1 SMS message(s).", "<b>SMS #1</b> REC READ", "hello &lt;world&gt;&amp;", "<b>Sender</b>: <code>+123&lt;456&gt;</code>", "<b>Received</b>: <code>26/06/19,18:00:00+32</code>"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("SMS history text missing %q: %s", want, text)
+		}
+	}
+	if strings.Contains(text, "<pre>") {
+		t.Fatalf("SMS history should not use code blocks: %s", text)
+	}
+	bodyAt := strings.Index(text, "hello &lt;world&gt;&amp;")
+	senderAt := strings.Index(text, "<b>Sender</b>")
+	receivedAt := strings.Index(text, "<b>Received</b>")
+	if bodyAt < 0 || senderAt < 0 || receivedAt < 0 || bodyAt > senderAt || senderAt > receivedAt {
+		t.Fatalf("SMS history body should appear before sender and received metadata: %s", text)
 	}
 }
 

@@ -151,7 +151,7 @@ func explainCMGL(lines []string) []string {
 	}
 	items := []string{fmt.Sprintf("Read %d SMS message(s).", len(messages))}
 	for _, msg := range messages {
-		items = append(items, fmt.Sprintf("#%s %s from <code>%s</code> at <code>%s</code>\n<pre>%s</pre>", html.EscapeString(msg.index), html.EscapeString(msg.status), html.EscapeString(msg.from), html.EscapeString(defaultText(msg.at, "unknown")), escapeAndTruncate(defaultText(msg.text, "(empty)"), cmglItemMax)))
+		items = append(items, fmt.Sprintf("<b>SMS #%s</b> %s\n\n%s\n\n<b>Sender</b>: <code>%s</code>\n<b>Received</b>: <code>%s</code>", html.EscapeString(msg.index), html.EscapeString(msg.status), escapeAndTruncate(defaultText(msg.text, "(empty)"), cmglItemMax), html.EscapeString(msg.from), html.EscapeString(defaultText(msg.at, "unknown"))))
 	}
 	return items
 }
