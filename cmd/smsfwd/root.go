@@ -62,16 +62,34 @@ func newForwardCommand() *cobra.Command {
 }
 
 func newPortsCommand() *cobra.Command {
-	return &cobra.Command{
+	cfg := config.Default()
+	baud := cfg.Baud
+	probe := true
+	probeTimeout := serialport.DefaultProbeTimeout
+	cmd := &cobra.Command{
 		Use:   "ports",
 		Short: "List serial port candidates",
-		Long:  "List detected serial ports, with Air780E and stable device paths ranked first when available.",
+		Long:  "List detected serial ports, probe candidates with a bare AT command, and mark the port auto-detect would choose.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			serialport.PrintCandidates()
+			if probe {
+				if baud <= 0 {
+					return fmt.Errorf("invalid baud %d", baud)
+				}
+				if probeTimeout <= 0 {
+					return fmt.Errorf("invalid probe timeout %s", probeTimeout)
+				}
+				serialport.PrintProbedCandidates(baud, probeTimeout)
+			} else {
+				serialport.PrintCandidates()
+			}
 			return nil
 		},
 	}
+	cmd.Flags().IntVar(&baud, "baud", baud, "baud rate used for AT probes")
+	cmd.Flags().BoolVar(&probe, "probe", probe, "probe each candidate with a bare AT command")
+	cmd.Flags().DurationVar(&probeTimeout, "probe-timeout", probeTimeout, "timeout per AT probe")
+	return cmd
 }
 
 func newVersionCommand() *cobra.Command {

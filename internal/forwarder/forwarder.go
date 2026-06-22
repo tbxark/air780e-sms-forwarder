@@ -32,7 +32,7 @@ const (
 var (
 	errSerialNotConnected  = errors.New("serial not connected")
 	errSerialSessionClosed = errors.New("serial session closed")
-	autoDetectSerialPort   = serialport.AutoDetect
+	autoDetectSerialPort   = serialport.AutoDetectWithBaud
 	openSerialPort         = serialport.Open
 )
 
@@ -265,7 +265,7 @@ func runReconnectLoopWithOptions(ctx context.Context, cfg config.Config, executo
 func runSerialSession(ctx context.Context, cfg config.Config, executor *reconnectableExecutor, sender *telegramSender) error {
 	portName := cfg.Port
 	if portName == "" {
-		port, err := autoDetectSerialPort()
+		port, err := autoDetectSerialPort(cfg.Baud)
 		if err != nil {
 			return fmt.Errorf("serial port not found: %w", err)
 		}

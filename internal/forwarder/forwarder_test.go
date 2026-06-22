@@ -117,7 +117,7 @@ func TestRunSerialSessionAutoDetectsEachAttempt(t *testing.T) {
 	originalAutoDetect := autoDetectSerialPort
 	originalOpen := openSerialPort
 	autoDetectCalls := 0
-	autoDetectSerialPort = func() (string, error) {
+	autoDetectSerialPort = func(int) (string, error) {
 		autoDetectCalls++
 		return "/dev/ttyUSB-test", nil
 	}

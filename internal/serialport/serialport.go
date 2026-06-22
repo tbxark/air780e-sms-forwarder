@@ -9,22 +9,45 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"go.bug.st/serial"
 )
 
 type Candidate struct {
-	Port   string
-	Source string
-	Score  int
+	Port           string
+	Source         string
+	Score          int
+	ProbeAttempted bool
+	ProbeOK        bool
+	ProbeError     string
 }
 
+const (
+	DefaultProbeTimeout = 1500 * time.Millisecond
+	defaultProbeBaud    = 115200
+)
+
+var (
+	candidateProvider = Candidates
+	probeSerialPort   = ProbeAT
+)
+
 func AutoDetect() (string, error) {
-	candidates := Candidates()
+	return AutoDetectWithBaud(defaultProbeBaud)
+}
+
+func AutoDetectWithBaud(baud int) (string, error) {
+	candidates := candidateProvider()
 	if len(candidates) == 0 {
 		return "", fmt.Errorf("no matching ports")
 	}
-	return candidates[0].Port, nil
+	probed := ProbeCandidates(candidates, baud, DefaultProbeTimeout)
+	selected, ok := SelectAutoDetectCandidate(probed)
+	if !ok {
+		return "", fmt.Errorf("no matching ports")
+	}
+	return selected.Port, nil
 }
 
 func Open(portName string, baud int) (serial.Port, error) {
@@ -41,13 +64,33 @@ func Open(portName string, baud int) (serial.Port, error) {
 
 func PrintCandidates() {
 	candidates := Candidates()
+	printCandidates(candidates, "")
+}
+
+func PrintProbedCandidates(baud int, timeout time.Duration) {
+	candidates := ProbeCandidates(Candidates(), baud, timeout)
+	selected, _ := SelectAutoDetectCandidate(candidates)
+	printCandidates(candidates, selected.Port)
+}
+
+func printCandidates(candidates []Candidate, selectedPort string) {
 	if len(candidates) == 0 {
 		slog.Warn("no serial candidates found")
 		return
 	}
 
 	for _, candidate := range candidates {
-		slog.Info("serial candidate", "port", candidate.Port, "score", candidate.Score, "source", candidate.Source)
+		args := []any{"port", candidate.Port, "score", candidate.Score, "source", candidate.Source}
+		if selectedPort != "" {
+			args = append(args, "auto", candidate.Port == selectedPort)
+		}
+		if candidate.ProbeAttempted {
+			args = append(args, "probe", candidateProbeStatus(candidate))
+			if candidate.ProbeError != "" {
+				args = append(args, "probe_error", candidate.ProbeError)
+			}
+		}
+		slog.Info("serial candidate", args...)
 	}
 }
 
@@ -117,6 +160,129 @@ func RankCandidates(candidates []Candidate) []Candidate {
 		return ranked[i].Port < ranked[j].Port
 	})
 	return ranked
+}
+
+func ProbeCandidates(candidates []Candidate, baud int, timeout time.Duration) []Candidate {
+	probed := make([]Candidate, len(candidates))
+	for i, candidate := range candidates {
+		candidate.ProbeAttempted = true
+		candidate.ProbeOK = false
+		candidate.ProbeError = ""
+		ok, err := probeSerialPort(candidate.Port, baud, timeout)
+		candidate.ProbeOK = ok
+		if err != nil {
+			candidate.ProbeError = err.Error()
+		}
+		probed[i] = candidate
+	}
+	sort.SliceStable(probed, func(i, j int) bool {
+		return probed[i].ProbeOK && !probed[j].ProbeOK
+	})
+	return probed
+}
+
+func SelectAutoDetectCandidate(candidates []Candidate) (Candidate, bool) {
+	for _, candidate := range candidates {
+		if candidate.ProbeOK {
+			return candidate, true
+		}
+	}
+	if len(candidates) == 0 {
+		return Candidate{}, false
+	}
+	return candidates[0], true
+}
+
+func ProbeAT(portName string, baud int, timeout time.Duration) (bool, error) {
+	if timeout <= 0 {
+		timeout = DefaultProbeTimeout
+	}
+	port, err := Open(portName, baud)
+	if err != nil {
+		return false, err
+	}
+	defer func() {
+		if err := port.Close(); err != nil {
+			slog.Warn("serial probe close failed", "port", portName, "err", err)
+		}
+	}()
+	return probeOpenedATPort(port, timeout)
+}
+
+func probeOpenedATPort(port serial.Port, timeout time.Duration) (bool, error) {
+	if timeout <= 0 {
+		timeout = DefaultProbeTimeout
+	}
+	if err := port.SetReadTimeout(minDuration(100*time.Millisecond, timeout)); err != nil {
+		return false, fmt.Errorf("set read timeout: %w", err)
+	}
+	if err := port.ResetInputBuffer(); err != nil {
+		slog.Debug("serial probe reset input failed", "err", err)
+	}
+	if err := port.ResetOutputBuffer(); err != nil {
+		slog.Debug("serial probe reset output failed", "err", err)
+	}
+	probeCommand := []byte("AT\r")
+	if n, err := port.Write(probeCommand); err != nil {
+		return false, fmt.Errorf("write AT: %w", err)
+	} else if n != len(probeCommand) {
+		return false, fmt.Errorf("write AT: short write %d/%d", n, len(probeCommand))
+	}
+
+	deadline := time.Now().Add(timeout)
+	buf := make([]byte, 128)
+	var response strings.Builder
+	for time.Now().Before(deadline) {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			break
+		}
+		if err := port.SetReadTimeout(minDuration(100*time.Millisecond, remaining)); err != nil {
+			return false, fmt.Errorf("set read timeout: %w", err)
+		}
+		n, err := port.Read(buf)
+		if n > 0 {
+			response.Write(buf[:n])
+			if responseHasATLine(response.String(), "OK") {
+				return true, nil
+			}
+			if responseHasATLine(response.String(), "ERROR") {
+				return false, fmt.Errorf("AT returned ERROR")
+			}
+		}
+		if err != nil {
+			return false, fmt.Errorf("read AT response: %w", err)
+		}
+	}
+	if response.Len() > 0 {
+		return false, fmt.Errorf("AT response without OK: %q", strings.TrimSpace(response.String()))
+	}
+	return false, fmt.Errorf("AT probe timeout")
+}
+
+func responseHasATLine(response string, target string) bool {
+	for _, line := range strings.FieldsFunc(response, func(r rune) bool {
+		return r == '\r' || r == '\n'
+	}) {
+		if strings.EqualFold(strings.TrimSpace(line), target) {
+			return true
+		}
+	}
+	return false
+}
+
+func candidateProbeStatus(candidate Candidate) string {
+	if candidate.ProbeOK {
+		return "ok"
+	}
+	return "failed"
+}
+
+func minDuration(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func ScorePortName(path string) int {

@@ -1,6 +1,10 @@
 package serialport
 
-import "testing"
+import (
+	"errors"
+	"testing"
+	"time"
+)
 
 func TestRankCandidates(t *testing.T) {
 	candidates := RankCandidates([]Candidate{
@@ -17,6 +21,106 @@ func TestRankCandidates(t *testing.T) {
 	}
 	if candidates[0].Source != "by-id:usb-EigenComm_Compo-if03" {
 		t.Fatalf("first source = %q", candidates[0].Source)
+	}
+}
+
+func TestAutoDetectWithBaudPrefersProbeOK(t *testing.T) {
+	originalCandidateProvider := candidateProvider
+	originalProbeSerialPort := probeSerialPort
+	defer func() {
+		candidateProvider = originalCandidateProvider
+		probeSerialPort = originalProbeSerialPort
+	}()
+
+	candidateProvider = func() []Candidate {
+		return []Candidate{
+			{Port: "/dev/ttyUSB0", Source: "by-id:usb-EigenComm-if03", Score: 180},
+			{Port: "/dev/ttyUSB1", Source: "by-id:usb-EigenComm-if02", Score: 150},
+		}
+	}
+	probeSerialPort = func(port string, baud int, timeout time.Duration) (bool, error) {
+		if baud != 9600 {
+			t.Fatalf("baud = %d, want 9600", baud)
+		}
+		if timeout != DefaultProbeTimeout {
+			t.Fatalf("timeout = %s, want %s", timeout, DefaultProbeTimeout)
+		}
+		if port == "/dev/ttyUSB1" {
+			return true, nil
+		}
+		return false, errors.New("no AT response")
+	}
+
+	port, err := AutoDetectWithBaud(9600)
+	if err != nil {
+		t.Fatalf("AutoDetectWithBaud returned error: %v", err)
+	}
+	if port != "/dev/ttyUSB1" {
+		t.Fatalf("port = %q, want /dev/ttyUSB1", port)
+	}
+}
+
+func TestAutoDetectWithBaudFallsBackToRankedCandidate(t *testing.T) {
+	originalCandidateProvider := candidateProvider
+	originalProbeSerialPort := probeSerialPort
+	defer func() {
+		candidateProvider = originalCandidateProvider
+		probeSerialPort = originalProbeSerialPort
+	}()
+
+	candidateProvider = func() []Candidate {
+		return []Candidate{
+			{Port: "/dev/ttyUSB0", Source: "by-id:usb-EigenComm-if03", Score: 180},
+			{Port: "/dev/ttyUSB1", Source: "by-id:usb-EigenComm-if02", Score: 150},
+		}
+	}
+	probeSerialPort = func(string, int, time.Duration) (bool, error) {
+		return false, errors.New("no AT response")
+	}
+
+	port, err := AutoDetectWithBaud(115200)
+	if err != nil {
+		t.Fatalf("AutoDetectWithBaud returned error: %v", err)
+	}
+	if port != "/dev/ttyUSB0" {
+		t.Fatalf("port = %q, want /dev/ttyUSB0", port)
+	}
+}
+
+func TestProbeCandidatesMovesATOKFirst(t *testing.T) {
+	originalProbeSerialPort := probeSerialPort
+	defer func() {
+		probeSerialPort = originalProbeSerialPort
+	}()
+
+	probeSerialPort = func(port string, baud int, timeout time.Duration) (bool, error) {
+		if port == "/dev/ttyUSB1" {
+			return true, nil
+		}
+		return false, errors.New("no AT response")
+	}
+
+	candidates := ProbeCandidates([]Candidate{
+		{Port: "/dev/ttyUSB0", Source: "ranked-first", Score: 180},
+		{Port: "/dev/ttyUSB1", Source: "ranked-second", Score: 150},
+	}, 115200, time.Second)
+	if len(candidates) != 2 {
+		t.Fatalf("len = %d, want 2", len(candidates))
+	}
+	if candidates[0].Port != "/dev/ttyUSB1" || !candidates[0].ProbeOK {
+		t.Fatalf("first candidate = %+v, want probed OK /dev/ttyUSB1", candidates[0])
+	}
+	if !candidates[1].ProbeAttempted || candidates[1].ProbeError == "" {
+		t.Fatalf("second candidate probe metadata = %+v, want failed probe metadata", candidates[1])
+	}
+}
+
+func TestResponseHasATLine(t *testing.T) {
+	if !responseHasATLine("\r\nAT\r\r\nOK\r\n", "OK") {
+		t.Fatal("expected OK line")
+	}
+	if responseHasATLine("\r\nBROKEN\r\n", "OK") {
+		t.Fatal("did not expect substring match")
 	}
 }
 
