@@ -296,7 +296,7 @@ func runOpenedSerialSession(ctx context.Context, cfg config.Config, portName str
 	atModem = modem.NewAT(port, rawLines, events)
 
 	if cfg.InitModem {
-		if err := modem.InitAir780E(atModem); err != nil {
+		if err := modem.InitAir780E(atModem, time.Duration(cfg.SIMReadyTimeoutSeconds)*time.Second); err != nil {
 			return fmt.Errorf("initialize modem failed: %w", err)
 		}
 	}

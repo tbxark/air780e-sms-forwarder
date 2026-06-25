@@ -14,7 +14,7 @@ import (
 const (
 	cpinCommand      = "+CPIN?"
 	cpinReadyLine    = "+CPIN: READY"
-	cpinReadyTimeout = 30 * time.Second
+	cpinReadyTimeout = 120 * time.Second
 	cpinRetryDelay   = 2 * time.Second
 )
 
@@ -43,8 +43,11 @@ func NewAT(port io.ReadWriter, rawLines chan<- string, events chan<- sms.Event) 
 	)
 }
 
-func InitAir780E(modem atCommander) error {
-	return initAir780E(modem, cpinReadyTimeout, cpinRetryDelay)
+func InitAir780E(modem atCommander, simReadyTimeout time.Duration) error {
+	if simReadyTimeout <= 0 {
+		simReadyTimeout = cpinReadyTimeout
+	}
+	return initAir780E(modem, simReadyTimeout, cpinRetryDelay)
 }
 
 func initAir780E(modem atCommander, cpinTimeout, cpinDelay time.Duration) error {

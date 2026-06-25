@@ -132,6 +132,7 @@ Configuration is read only from `config.json` in the current working directory. 
   "port": "/dev/cu.usbmodem0000000000013",
   "baud": 115200,
   "init_modem": true,
+  "sim_ready_timeout_seconds": 120,
   "telegram_raw": false,
   "telegram_token": "123456:abc...",
   "telegram_chat": "123456789"

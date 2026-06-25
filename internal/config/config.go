@@ -10,21 +10,23 @@ import (
 const DefaultPath = "config.json"
 
 type Config struct {
-	Port          string `json:"port"`
-	Baud          int    `json:"baud"`
-	InitModem     bool   `json:"init_modem"`
-	TelegramRaw   bool   `json:"telegram_raw"`
-	TelegramToken string `json:"telegram_token"`
-	TelegramChat  string `json:"telegram_chat"`
+	Port                   string `json:"port"`
+	Baud                   int    `json:"baud"`
+	InitModem              bool   `json:"init_modem"`
+	SIMReadyTimeoutSeconds int    `json:"sim_ready_timeout_seconds"`
+	TelegramRaw            bool   `json:"telegram_raw"`
+	TelegramToken          string `json:"telegram_token"`
+	TelegramChat           string `json:"telegram_chat"`
 }
 
 func Default() Config {
 	return Config{
-		Port:          "",
-		Baud:          115200,
-		InitModem:     true,
-		TelegramToken: "",
-		TelegramChat:  "",
+		Port:                   "",
+		Baud:                   115200,
+		InitModem:              true,
+		SIMReadyTimeoutSeconds: 120,
+		TelegramToken:          "",
+		TelegramChat:           "",
 	}
 }
 
@@ -58,6 +60,9 @@ func (c *Config) applyDefaults(defaults Config) {
 	}
 	if c.Baud == 0 {
 		c.Baud = defaults.Baud
+	}
+	if c.SIMReadyTimeoutSeconds == 0 {
+		c.SIMReadyTimeoutSeconds = defaults.SIMReadyTimeoutSeconds
 	}
 	if c.TelegramToken == "" {
 		c.TelegramToken = defaults.TelegramToken
